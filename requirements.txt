@@ -1,5 +1,5 @@
 torch
-transformers
+transformers==3.3.1
 sklearn
 numpy
 dill
