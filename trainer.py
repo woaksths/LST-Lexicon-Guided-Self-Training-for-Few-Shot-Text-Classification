@@ -5,6 +5,7 @@ from torch.utils.data import  DataLoader
 from util.early_stopping import EarlyStopping
 from transformers import BertTokenizer, BertForSequenceClassification
 from util.dataset import Dataset
+from weak_supervision import guide_pseudo_labeling
 
 class Trainer(object):
     def __init__(self, config, model, criterion, optimizer, save_path, dev_dataset, test_dataset):
@@ -86,20 +87,20 @@ class Trainer(object):
     def initial_train(self, label_dataset):
         print('initial train module')
         self.train_loader = DataLoader(label_dataset, **self.config.train_params)
-        self.early_stopping = EarlyStopping(patience=3, verbose=True)
-        min_dev_loss = 987654321
+        self.early_stopping = EarlyStopping(patience=5, verbose=True)
+        best_dev_acc = -1
         
         for epoch in range(self.config.epochs):
             self.train_epoch(epoch)
             dev_loss, dev_acc = self.evaluator.evaluate(self.model, self.valid_loader)
             self.early_stopping(dev_loss)
             
-            if dev_loss < min_dev_loss:
-                min_dev_loss = dev_loss
+            if best_dev_acc <= dev_acc:
+                best_dev_acc = dev_acc
                 torch.save({'model_state_dict':self.model.state_dict(),
                             'optimizer_state_dict':self.optimizer.state_dict(),'epoch':epoch}, self.sup_path +'/checkpoint.pt')
                 
-            if epoch % 3 == 0:
+            if epoch % 1 == 0:
                 test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
             
             if self.early_stopping.early_stop:
@@ -107,20 +108,19 @@ class Trainer(object):
                 break
 
                 
-    def self_train(self, labeled_dataset, unlabeled_dataset, confidence_threshold=0.9):
+    def self_train(self, labeled_dataset, unlabeled_dataset, guide_type=None, confidence_threshold=0.9):
         best_accuracy = -1
         min_dev_loss = 987654321
         
         for outer_epoch in range(self.config.epochs):
             # pseudo-labeling
-            new_dataset = self.pseudo_labeling(unlabeled_dataset, confidence_threshold)
+            new_dataset = self.pseudo_labeling(unlabeled_dataset, confidence_threshold, guide_type)
             
             # update dataset (remove pseudo-labeled from unlabeled dataset and add them into labeled dataset)
             labeled_dataset, unlabeled_dataset = self.update_dataset(labeled_dataset, unlabeled_dataset, new_dataset)
             
             self.train_loader = DataLoader(labeled_dataset, **self.config.train_params)
-            self.early_stopping = EarlyStopping(patience=3, verbose=True)
-            
+            self.early_stopping = EarlyStopping(patience=5, verbose=True)
             
             # retrain model with labeled data + pseudo-labeled data
             for inner_epoch in range(self.config.epochs):
@@ -146,7 +146,7 @@ class Trainer(object):
         print('Best accuracy {}'.format(best_accuracy))
     
     
-    def pseudo_labeling(self, unlabeled_dataset, confidence_threshold):
+    def pseudo_labeling(self, unlabeled_dataset, confidence_threshold, guide_type=None):
         unlabeled_loader = DataLoader(unlabeled_dataset, **self.config.unlabeled_params)
         self.model.eval()
         new_dataset = {label:[] for label in range(self.config.class_num)}
@@ -166,7 +166,21 @@ class Trainer(object):
                 for text_id, label, conf_val, target in zip(ids, big_idx, big_val, targets):
                     pred_label, conf_val, target = label.item(), conf_val.item(), target.item()
                     if conf_val >= confidence_threshold:
-                        new_dataset[pred_label].append((text_id, pred_label, target))
+                        decoded_text = self.tokenizer.decode(text_id)
+                        decoded_text = decoded_text.replace("[CLS]", "").replace("[SEP]","").replace("[PAD]","").strip()
+                        new_dataset[pred_label].append((text_id, decoded_text, pred_label, target))
+        
+        print(len(new_dataset[0]), len(new_dataset[1]))
+        if guide_type == 'predefined_lexicon':
+            new_dataset = guide_pseudo_labeling(new_dataset, guide_type)
+        elif guide_type =='generated_lexicon':
+            pass
+        elif guide_type == 'naive_bayes':
+            pass
+        elif guide_type == 'advanced_nb':
+            pass
+        
+        # make new_dataset being balanced 
         
         num_of_min_dataset = 987654321
         for label, dataset in new_dataset.items():
@@ -182,13 +196,14 @@ class Trainer(object):
             balanced_dataset.extend(new_dataset[label][:num_of_min_dataset])
         
         for data in balanced_dataset:
-            text_id, pred_label, target = data[0], data[1], data[2]
+            text_id, decoded_text, pred_label, target = data[0], data[1], data[2], data[3]
             if pred_label == target:
                 correct+=1
             total+=1
             
         print(' pseduo-label {}/{}'.format(correct, total))
-        return balanced_dataset
+        1/0
+        return new_dataset #balanced_dataset
 
     
     def update_dataset(self, labeled_dataset, unlabeled_dataset, new_dataset):
