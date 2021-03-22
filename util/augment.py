@@ -47,10 +47,12 @@ def get_synonyms(word):
     synonyms = set()
     for syn in wordnet.synsets(word):
         for l in syn.lemmas():
+            if '_' in l.name() or '-' in l.name():
+                continue
             synonym = l.name().replace("_", " ").replace("-", " ").lower()
             synonym = "".join([char for char in synonym if char in ' qwertyuiopasdfghjklzxcvbnm'])
             synonyms.add(synonym)
-    
+
     if word in synonyms:
         synonyms.remove(word)
     
@@ -79,16 +81,14 @@ def synonym_replacement(words, num):
 def word_replacement(texts, labels):
     replaced_texts = []
     replaced_labels = []
-    replace_ratio = 0.1
+    replace_ratio = 0.3
     
     for sent, label in zip(texts, labels):
         words = sent.split(' ')
         num_words = len(words)
         n_sr = max(1, int(replace_ratio*num_words))
         replaced_sent = synonym_replacement(words, n_sr)
-        
         replaced_texts.append(replaced_sent)
-        replaced_labels.append(label)
-        
+        replaced_labels.append(label)        
     return replaced_texts, replaced_labels
     

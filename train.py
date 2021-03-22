@@ -6,6 +6,7 @@ from transformers import BertTokenizer, BertForSequenceClassification
 from torch.utils.data import  DataLoader
 from trainer import Trainer
 from util.augment import *
+import copy
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_path', required = True)
@@ -30,13 +31,22 @@ tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 labeled_texts = [data[0] for data in labeled_data]
 labeled_labels = [data[1] for data in labeled_data]
 
+train_texts = copy.deepcopy(labeled_texts)
+train_labels = copy.deepcopy(labeled_labels)
+
 if args.do_augment is True:
     augmented_texts, augmented_labels = back_translate(labeled_texts, labeled_labels)
-    labeled_texts.extend(augmented_texts)
-    labeled_labels.extend(augmented_labels)
-
-labeled_encodings = tokenizer(labeled_texts, truncation=True, padding=True)
-labeled_dataset = Dataset(labeled_encodings, labeled_labels)
+    train_texts.extend(augmented_texts)
+    train_labels.extend(augmented_labels)
+    
+    augmented_texts, augmented_labels = word_replacement(labeled_texts, labeled_labels)
+    train_texts.extend(augmented_texts)
+    train_labels.extend(augmented_labels)
+    
+    print(len(train_texts), len(train_labels))
+    
+train_encodings = tokenizer(train_texts, truncation=True, padding=True)
+train_dataset = Dataset(train_encodings, train_labels)
 
 dev_texts = [data[0] for data in dev_data]
 dev_labels = [data[1] for data in dev_data]
@@ -52,6 +62,9 @@ unlabeled_labels = [data[1] for data in unlabeled_data]
 unlabeled_encodings = tokenizer(unlabeled_texts, truncation=True, padding=True)
 unlabeled_dataset = Dataset(unlabeled_encodings, unlabeled_labels)
 
+labeled_encodings = tokenizer(labeled_texts, truncation=True, padding=True)
+labeled_dataset = Dataset(labeled_encodings, labeled_labels)
+
 # Build model 
 model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=config.class_num)
 
@@ -63,7 +76,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=2e-5) #or AdamW
 trainer = Trainer(config, model, loss_function, optimizer, args.save_path, dev_dataset, test_dataset)
 
 # Initial training (supervised leraning)
-trainer.initial_train(labeled_dataset)
+trainer.initial_train(train_dataset)
 
 # load checkpoint 
 checkpoint_path = trainer.sup_path +'/checkpoint.pt'
@@ -83,7 +96,8 @@ trainer.optimizer = optimizer
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)
 
 # self-training
-trainer.self_train(labeled_dataset, unlabeled_dataset)
+# guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
+trainer.self_train(labeled_dataset, unlabeled_dataset, guide_type= 'predefined_lexicon')
 
 # eval semi-supervised trained model 
 checkpoint_path = trainer.ssl_path +'/checkpoint.pt'
