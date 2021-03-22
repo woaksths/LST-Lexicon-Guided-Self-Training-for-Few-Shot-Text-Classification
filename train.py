@@ -78,16 +78,10 @@ trainer = Trainer(config, model, loss_function, optimizer, args.save_path, dev_d
 # Initial training (supervised leraning)
 trainer.initial_train(train_dataset)
 
-# load checkpoint 
-checkpoint_path = trainer.sup_path +'/checkpoint.pt'
-checkpoint = torch.load(checkpoint_path)
-
+# load sup checkpoint 
 del model, optimizer, trainer.model, trainer.optimizer
-model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=config.class_num).to(config.device)
+model = BertForSequenceClassification.from_pretrained(trainer.sup_path).to(config.device)
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
-
-model.load_state_dict(checkpoint['model_state_dict'])
-optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 trainer.model = model
 trainer.optimizer = optimizer
@@ -95,22 +89,16 @@ trainer.optimizer = optimizer
 # eval supervised trained model 
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)
 
-# self-training
-# guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
+# self-training -> guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
 trainer.self_train(labeled_dataset, unlabeled_dataset, guide_type= 'predefined_lexicon')
 
-# eval semi-supervised trained model 
-checkpoint_path = trainer.ssl_path +'/checkpoint.pt'
-checkpoint = torch.load(checkpoint_path)
-
+# load ssl checkpoint
 del model, optimizer, trainer.model, trainer.optimizer
-model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=config.class_num).to(config.device)
+model = BertForSequenceClassification.from_pretrained(trainer.ssl_path).to(config.device)
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
-
-model.load_state_dict(checkpoint['model_state_dict'])
-optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 trainer.model = model
 trainer.optimizer = optimizer
 
+# eval semi-supervised trained model 
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)

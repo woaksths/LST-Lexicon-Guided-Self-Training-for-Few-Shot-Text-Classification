@@ -97,9 +97,8 @@ class Trainer(object):
             
             if best_dev_acc <= dev_acc:
                 best_dev_acc = dev_acc
-                torch.save({'model_state_dict':self.model.state_dict(),
-                            'optimizer_state_dict':self.optimizer.state_dict(),'epoch':epoch}, self.sup_path +'/checkpoint.pt')
-                
+                self.model.save_pretrained(self.sup_path)
+
             if epoch % 1 == 0:
                 test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
             
@@ -131,8 +130,8 @@ class Trainer(object):
                 
                 if dev_loss < min_dev_loss:
                     min_dev_loss = dev_loss
-                    torch.save({'model_state_dict':self.model.state_dict(),
-                                'optimizer_state_dict':self.optimizer.state_dict(), 'epoch':inner_epoch}, self.ssl_path +'/checkpoint.pt')
+                    # https://huggingface.co/transformers/main_classes/model.html#transformers.PreTrainedModel.save_pretrained
+                    self.model.save_pretrained(self.sup_path)
                 
                 if inner_epoch % 2 == 0:
                     test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
