@@ -90,7 +90,7 @@ trainer.optimizer = optimizer
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)
 
 # self-training -> guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
-trainer.self_train(labeled_dataset, unlabeled_dataset, guide_type= 'predefined_lexicon')
+trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels)))# guide_type= 'predefined_lexicon')
 
 # load ssl checkpoint
 del model, optimizer, trainer.model, trainer.optimizer

@@ -6,6 +6,7 @@ from util.early_stopping import EarlyStopping
 from transformers import BertTokenizer, BertForSequenceClassification
 from util.dataset import Dataset
 from weak_supervision import guide_pseudo_labeling
+import random
 
 class Trainer(object):
     def __init__(self, config, model, criterion, optimizer, save_path, dev_dataset, test_dataset):
@@ -110,14 +111,27 @@ class Trainer(object):
     def self_train(self, labeled_dataset, unlabeled_dataset, guide_type=None, confidence_threshold=0.9):
         best_accuracy = -1
         min_dev_loss = 987654321
+        print(len(unlabeled_dataset))
+        print(type(unlabeled_dataset))
         
         for outer_epoch in range(self.config.epochs):
+            sampled_num = len(unlabeled_dataset) // 5
+            random.shuffle(unlabeled_dataset)            
+            sampled_unlabeled = unlabeled_dataset[:sampled_num]
+            
+            sampled_text = [data[0] for data in sampled_unlabeled]
+            sampled_labels = [data[1] for data in sampled_unlabeled]
+            sampled_encodings = self.tokenizer(sampled_text, truncation=True, padding=True)
+            sampled_unlabeled_dataset = Dataset(sampled_encodings, sampled_labels)
+            
+            print('outer_epoch {} sampled unlabeled dataset {}'.format(outer_epoch, len(sampled_unlabeled_dataset)))
+            
             # pseudo-labeling
-            new_dataset = self.pseudo_labeling(unlabeled_dataset, confidence_threshold, guide_type)
+            new_dataset = self.pseudo_labeling(sampled_unlabeled_dataset, confidence_threshold, guide_type)
             
             # update dataset (remove pseudo-labeled from unlabeled dataset and add them into labeled dataset)
             labeled_dataset, unlabeled_dataset = self.update_dataset(labeled_dataset, unlabeled_dataset, new_dataset)
-            
+      
             self.train_loader = DataLoader(labeled_dataset, **self.config.train_params)
             self.early_stopping = EarlyStopping(patience=5, verbose=True)
             
@@ -130,7 +144,6 @@ class Trainer(object):
                 
                 if dev_loss < min_dev_loss:
                     min_dev_loss = dev_loss
-                    # https://huggingface.co/transformers/main_classes/model.html#transformers.PreTrainedModel.save_pretrained
                     self.model.save_pretrained(self.sup_path)
                 
                 if inner_epoch % 2 == 0:
@@ -169,7 +182,9 @@ class Trainer(object):
                         decoded_text = decoded_text.replace("[CLS]", "").replace("[SEP]","").replace("[PAD]","").strip()
                         new_dataset[pred_label].append((text_id, decoded_text, pred_label, target))
         
-        print(len(new_dataset[0]), len(new_dataset[1]))
+        # sort by confidence
+        # sampling ...top N (min(1000, (each label num)))
+        1/0
         if guide_type == 'predefined_lexicon':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type)
         elif guide_type =='generated_lexicon':
@@ -178,9 +193,8 @@ class Trainer(object):
             pass
         elif guide_type == 'advanced_nb':
             pass
-        
+                
         # make new_dataset being balanced 
-        
         num_of_min_dataset = 987654321
         for label, dataset in new_dataset.items():
             if num_of_min_dataset > len(dataset):
