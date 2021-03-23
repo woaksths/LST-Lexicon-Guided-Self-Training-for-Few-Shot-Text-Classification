@@ -111,6 +111,7 @@ class Trainer(object):
     def self_train(self, labeled_dataset, unlabeled_dataset, guide_type=None, confidence_threshold=0.9):
         best_accuracy = -1
         min_dev_loss = 987654321
+        best_dev_acc = -1
         print(len(unlabeled_dataset))
         print(type(unlabeled_dataset))
         
@@ -138,8 +139,10 @@ class Trainer(object):
             self.train_loader = DataLoader(combined_dataset, **self.config.train_params)
             self.early_stopping = EarlyStopping(patience=5, verbose=True)
             
-            # re-initialize the student model from scratch 
-            
+            # re-initialize the student model from scratch
+            del self.model, self.optimizer
+            self.model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=config.class_num)
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=2e-5)
             
             # retrain model with labeled data + pseudo-labeled data
             for inner_epoch in range(self.config.epochs):
@@ -148,11 +151,12 @@ class Trainer(object):
                 dev_loss, dev_acc = self.evaluator.evaluate(self.model, self.valid_loader)
                 self.early_stopping(dev_loss)
                 
-                if dev_loss < min_dev_loss:
-                    min_dev_loss = dev_loss
-                    self.model.save_pretrained(self.sup_path)
+                # save model when current dev_acc is greater than best_dev_acc 
+                if dev_acc > best_dev_acc:
+                    best_dev_acc = dev_acc
+                    self.model.save_pretrained(self.ssl_path)
                 
-                if inner_epoch % 2 == 0:
+                if inner_epoch % 1 == 0:
                     test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
                     if best_accuracy < test_acc:
                         best_accuracy = test_acc
