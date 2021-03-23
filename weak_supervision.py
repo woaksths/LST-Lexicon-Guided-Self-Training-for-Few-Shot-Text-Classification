@@ -11,11 +11,10 @@ def get_lexicon():
 lexicon = get_lexicon()
 lemmatizer = WordNetLemmatizer()
 
-
 def guide_pseudo_labeling(pseudo_labeled, guide_type):
     '''
-    @param dataset type: dict{pred_label}[list(tuple(text_id, decoded_text, pred_label, target))]
-    ''' 
+    @param dataset type: dict{pred_label}[list(tuple(text_id, decoded_text, pred_label, target, confidence))]
+    '''     
     labels = pseudo_labeled.keys()
     new_dataset = {label: [] for label in labels}
     for label in labels:
@@ -24,7 +23,7 @@ def guide_pseudo_labeling(pseudo_labeled, guide_type):
             decoded_text = data[1]
             model_pred = data[2]
             target = data[3]
-            
+            confidence = data[4]
             guide_pred = None
             
             if guide_type == 'predefined_lexicon':
@@ -37,11 +36,12 @@ def guide_pseudo_labeling(pseudo_labeled, guide_type):
                 pass
             
             if model_pred == guide_pred:
-                new_dataset[label].append((text_id, decoded_text, model_pred, target))    
+                new_dataset[label].append((text_id, decoded_text, model_pred, target, confidence))    
     return new_dataset
 
 
 def rule_base_with_lexicon(lexicon, text):
+    ## To do: set threshold -> matching count
     words = text.split(' ')
     words = [lemmatizer.lemmatize(word) for word in words]
     labels = lexicon.keys()

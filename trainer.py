@@ -129,11 +129,17 @@ class Trainer(object):
             # pseudo-labeling
             new_dataset = self.pseudo_labeling(sampled_unlabeled_dataset, confidence_threshold, guide_type)
             
-            # update dataset (remove pseudo-labeled from unlabeled dataset and add them into labeled dataset)
-            labeled_dataset, unlabeled_dataset = self.update_dataset(labeled_dataset, unlabeled_dataset, new_dataset)
-      
-            self.train_loader = DataLoader(labeled_dataset, **self.config.train_params)
+            # add pseudo-label into labeled data
+            combined_dataset, new_dataset = self.add_dataset(labeled_dataset, new_dataset)
+            
+            # remove pseudo-label from unlabeled data
+            # unlabeled_dataset = self.remove_dataset(unlabeled_dataset, new_dataset)
+            
+            self.train_loader = DataLoader(combined_dataset, **self.config.train_params)
             self.early_stopping = EarlyStopping(patience=5, verbose=True)
+            
+            # re-initialize the student model from scratch 
+            
             
             # retrain model with labeled data + pseudo-labeled data
             for inner_epoch in range(self.config.epochs):
@@ -180,11 +186,8 @@ class Trainer(object):
                     if conf_val >= confidence_threshold:
                         decoded_text = self.tokenizer.decode(text_id)
                         decoded_text = decoded_text.replace("[CLS]", "").replace("[SEP]","").replace("[PAD]","").strip()
-                        new_dataset[pred_label].append((text_id, decoded_text, pred_label, target))
-        
-        # sort by confidence
-        # sampling ...top N (min(1000, (each label num)))
-        1/0
+                        new_dataset[pred_label].append((text_id, decoded_text, pred_label, target, conf_val))
+                
         if guide_type == 'predefined_lexicon':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type)
         elif guide_type =='generated_lexicon':
@@ -193,67 +196,71 @@ class Trainer(object):
             pass
         elif guide_type == 'advanced_nb':
             pass
-                
+        
         # make new_dataset being balanced 
         num_of_min_dataset = 987654321
+        
         for label, dataset in new_dataset.items():
             if num_of_min_dataset > len(dataset):
                 num_of_min_dataset = len(dataset)
-                
-        for label in new_dataset.keys():
-            new_dataset[label] = new_dataset[label][:num_of_min_dataset]
-            
+        
+        # sampling top N 
+        top_N = 1000
+        num_of_min_dataset = min(top_N, num_of_min_dataset)
+        print('num_of_min_dataset', num_of_min_dataset)
+
         total, correct = 0, 0
         balanced_dataset = []
-        for label in new_dataset.keys():
-            balanced_dataset.extend(new_dataset[label][:num_of_min_dataset])
         
+        for label in new_dataset.keys():
+            # sort by confidence
+            new_dataset[label].sort(key=lambda x:x[4], reverse=True)
+            balanced_dataset.extend(new_dataset[label][:num_of_min_dataset])        
+                
         for data in balanced_dataset:
-            text_id, decoded_text, pred_label, target = data[0], data[1], data[2], data[3]
+            text_id, decoded_text, pred_label, target, confidence = data[0], data[1], data[2], data[3], data[4]
             if pred_label == target:
                 correct+=1
             total+=1
-            
+        
+        print('#'*100)
         print(' pseduo-label {}/{}'.format(correct, total))
-        1/0
-        return new_dataset #balanced_dataset
+        return balanced_dataset
 
     
-    def update_dataset(self, labeled_dataset, unlabeled_dataset, new_dataset):
-        '''
-        @param new_dataset type list(tuple(text_ids, pred_label, target_label))
-        '''
+    def add_dataset(self, labeled_dataset, new_dataset):
+        labeleld_texts, labeled_labels = self.decoded_dataset(labeled_dataset)
         new_texts = []
         new_labels = []
+        
         for idx in range(len(new_dataset)):
-            text_id = new_dataset[idx][0]
-            pred_label = new_dataset[idx][1]
-            decoded_text = self.tokenizer.decode(text_id)
-            decoded_text = decoded_text.replace("[CLS]", "").replace("[SEP]","").replace("[PAD]","").strip()
+            decoded_text = new_dataset[idx][1]
+            pred_label = new_dataset[idx][2]            
+            
             new_texts.append(decoded_text)
             new_labels.append(pred_label)
         
-        labeled_texts, labeled_labels = self.decode_dataset(labeled_dataset)
-        unlabeled_texts, unlabeled_labels = self.decode_dataset(unlabeled_dataset)
-        print('labeled {} unlabeled {}'.format(len(labeled_texts), len(unlabeled_texts)))
-        print('pseudo-labeled', len(new_texts))
+        combined_texts = labeled_texts + new_texts
+        combined_labels = labeled_labels + new_labels
+        combined_dataset = self.encode_dataset(combined_texts, combined_labels)
+        return combined_dataset, list(zip(new_texts, new_labels))
+    
+    
+    def remove_dataset(self, unlabeled_dataset, new_dataset):
+        unlabeled_texts = [data[0] for data in unlabeled_dataset]
+        unlabeled_labels = [data[1] for data in unlabeled_dataset]
         
-        # add pseudo_labeled into labeled dataset
-        labeled_texts.extend(new_texts)
-        labeled_labels.extend(new_labels)
+        new_texts = [data[0] for data in new_dataset]
+        new_labels = [data[1] for data in new_dataset]
         
         # remove pseudo-labeled from unlabeled dataset
         for text in new_texts:
             idx = unlabeled_texts.index(text)
             unlabeled_texts.pop(idx)
             unlabeled_labels.pop(idx)
-        print('After updated -> labeled {} unlabeled {}'.format(len(labeled_texts), len(unlabeled_texts)))
-        
-        # encodings -> make dataset
-        labeled_dataset = self.encode_dataset(labeled_texts, labeled_labels)
-        unlabeled_dataset = self.encode_dataset(unlabeled_texts, unlabeled_labels)
-        return labeled_dataset, unlabeled_dataset
-        
+                    
+        return list(zip(unlabeled_texts, unlabeled_labels))
+    
         
     def encode_dataset(self, texts, labels):
         encodings = self.tokenizer(texts, truncation=True, padding=True)
