@@ -3,6 +3,7 @@ import constant as config
 import torch
 from util.dataset import read_dataset, sampling_dataset, Dataset
 from transformers import BertTokenizer, BertForSequenceClassification
+from model import BERT_ATTN
 from torch.utils.data import  DataLoader
 from trainer import Trainer
 from util.augment import *
@@ -12,6 +13,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--train_path', required = True)
 parser.add_argument('--test_path', required = True)
 parser.add_argument('--save_path', required = True)
+parser.add_argument('--model_type', required=True, help='type among [baseline, bert_attn]')
 parser.add_argument('--do_augment', type=bool, default=False, required = False)
 args = parser.parse_args()
 
@@ -19,7 +21,7 @@ args = parser.parse_args()
 train_texts, train_labels = read_dataset(args.train_path, config.class_num)
 test_texts, test_labels = read_dataset(args.test_path, config.class_num)
 
-# Dataset sampling -> Since we are going to simulate semi-supervised learning, we will assume that we only know a little part of labeled data.
+# dataset sampling -> Since we are going to simulate semi-supervised learning, we will assume that we only know a little part of labeled data.
 labeled_data, remained_data = sampling_dataset(list(zip(train_texts, train_labels)), class_num=config.class_num, sample_num=30)
 dev_data, unlabeled_data = sampling_dataset(remained_data, class_num=config.class_num, sample_num=30)
 
@@ -66,22 +68,28 @@ labeled_encodings = tokenizer(labeled_texts, truncation=True, padding=True)
 labeled_dataset = Dataset(labeled_encodings, labeled_labels)
 
 # Build model 
-model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=config.class_num)
-
+if args.model_type.lower() == 'baseline':
+    model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=config.class_num)
+else:
+    model = BERT_ATTN(num_labels=config.class_num) 
+    
 # Criterion & optimizer
 loss_function = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-5) #or AdamW
 
 # Init Trainer
-trainer = Trainer(config, model, loss_function, optimizer, args.save_path, dev_dataset, test_dataset)
+trainer = Trainer(config, model, loss_function, optimizer, args.save_path, dev_dataset, test_dataset, args.model_type)
 
 # Initial training (supervised leraning)
 trainer.initial_train(train_dataset)
 
 # load sup checkpoint 
 del model, optimizer, trainer.model, trainer.optimizer
-model = BertForSequenceClassification.from_pretrained(trainer.sup_path).to(config.device)
-optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+if args.model_type.lower() == 'baseline':
+    model = BertForSequenceClassification.from_pretrained(trainer.sup_path).to(config.device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+else:
+    pass
 
 trainer.model = model
 trainer.optimizer = optimizer
@@ -90,12 +98,15 @@ trainer.optimizer = optimizer
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)
 
 # self-training -> guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
-trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels)))# guide_type= 'predefined_lexicon')
+trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels)), guide_type= 'predefined_lexicon')
 
 # load ssl checkpoint
 del model, optimizer, trainer.model, trainer.optimizer
-model = BertForSequenceClassification.from_pretrained(trainer.ssl_path).to(config.device)
-optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+if args.model.type.lower() == 'baseline':
+    model = BertForSequenceClassification.from_pretrained(trainer.ssl_path).to(config.device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+else:
+    pass
 
 trainer.model = model
 trainer.optimizer = optimizer
