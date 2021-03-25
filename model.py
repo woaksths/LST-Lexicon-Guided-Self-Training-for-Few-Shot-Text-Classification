@@ -1,5 +1,3 @@
-## 4. 렉시콘은 best dev_acc일 때 생성 (cls, pad, sep, stop_words 제외 단어집 생성 count 고려해서 생성) 문장 내 중복 단어 binary할지
-
 
 import torch
 import torch.nn as nn

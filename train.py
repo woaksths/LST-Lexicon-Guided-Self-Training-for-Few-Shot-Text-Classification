@@ -89,7 +89,13 @@ if args.model_type.lower() == 'baseline':
     model = BertForSequenceClassification.from_pretrained(trainer.sup_path).to(config.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
 else:
-    pass
+    model = BERT_ATTN(num_labels=config.class_num).to(config.device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+    
+    checkpoint_path = trainer.sup_path +'/checkpoint.pt'
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 trainer.model = model
 trainer.optimizer = optimizer
@@ -98,7 +104,7 @@ trainer.optimizer = optimizer
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)
 
 # self-training -> guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
-trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels)), guide_type= 'predefined_lexicon')
+trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels)), guide_type= 'generated_lexicon')
 
 # load ssl checkpoint
 del model, optimizer, trainer.model, trainer.optimizer
@@ -106,7 +112,12 @@ if args.model.type.lower() == 'baseline':
     model = BertForSequenceClassification.from_pretrained(trainer.ssl_path).to(config.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
 else:
-    pass
+    model = BERT_ATTN(num_labels=config.class_num).to(config.device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
+    checkpoint_path = trainer.ssl_path +'/checkpoint.pt'
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 trainer.model = model
 trainer.optimizer = optimizer

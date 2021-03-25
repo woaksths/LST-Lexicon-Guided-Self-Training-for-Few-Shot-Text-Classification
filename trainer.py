@@ -7,11 +7,14 @@ from transformers import BertTokenizer, BertForSequenceClassification
 from util.dataset import Dataset
 from weak_supervision import guide_pseudo_labeling
 from nltk.stem import WordNetLemmatizer
+from model import BERT_ATTN
+
 import random
 import copy
 
 class Trainer(object):
-    def __init__(self, config, model, criterion, optimizer, save_path, dev_dataset, test_dataset, model_type):
+    def __init__(self, config, model, criterion, optimizer, 
+                 save_path, dev_dataset, test_dataset, model_type):
         self.config = config
         self.loss = criterion
         self.evaluator = Evaluator(loss=self.loss, batch_size=self.config.test_batch_size)
@@ -58,8 +61,8 @@ class Trainer(object):
         nb_tr_steps = 0
         nb_tr_examples = 0
         self.model.train()
-        print('train_epoch', epoch)
         
+        print('train_epoch', epoch)
         for _, batch in enumerate(self.train_loader):
             ids = batch['input_ids'].to(self.device, dtype=torch.long)
             attention_mask = batch['attention_mask'].to(self.device, dtype=torch.long)
@@ -94,8 +97,9 @@ class Trainer(object):
         epoch_accu = (n_correct*100)/nb_tr_examples
         print(f"Training Loss Epoch: {epoch_loss}")
         print(f"Training Accuracy Epoch: {epoch_accu}")
-                
+#         print('current epoch lex', self.lexicon_temp)
         
+    
     def initial_train(self, label_dataset):
         print('initial train module')
         self.train_loader = DataLoader(label_dataset, **self.config.train_params)
@@ -120,8 +124,8 @@ class Trainer(object):
                                 'optimizer_state_dict':self.optimizer.state_dict(),'epoch':epoch},
                                self.sup_path +'/checkpoint.pt')
             
-            print('lexicon_temp', self.lexicon_temp)
-            print('lexicon', self.lexicon)
+#             print('lexicon_temp', self.lexicon_temp)
+#             print('lexicon', self.lexicon)
             
             if epoch % 1 == 0:
                 test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
@@ -142,7 +146,7 @@ class Trainer(object):
         print(type(unlabeled_dataset))
         
         for outer_epoch in range(self.config.epochs):
-            sampled_num = len(unlabeled_dataset) // 5
+            sampled_num = len(unlabeled_dataset) // 4
             random.shuffle(unlabeled_dataset)            
             sampled_unlabeled = unlabeled_dataset[:sampled_num]
             
@@ -167,12 +171,16 @@ class Trainer(object):
             
             # re-initialize the student model from scratch
             del self.model, self.optimizer
-            self.model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=self.config.class_num).to(self.config.device)
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=2e-5)
-            
+            if self.model_type =='baseline':
+                self.model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=self.config.class_num).to(self.config.device)
+                self.optimizer = torch.optim.Adam(self.model.parameters(), lr=2e-5)
+            else:
+                self.model = BERT_ATTN(num_labels=self.config.class_num).to(self.config.device)
+                self.optimizer = torch.optim.Adam(self.model.parameters(), lr=2e-5)
+                
             # retrain model with labeled data + pseudo-labeled data
             for inner_epoch in range(self.config.epochs):
-                print('outer_epoch {} inner_epoch {}'.format(outer_epoch, inner_epoch))
+                print('outer_epoch {} inner_epoch {} best_accuracy {}'.format(outer_epoch, inner_epoch, best_accuracy))
                 self.train_epoch(inner_epoch)
                 dev_loss, dev_acc = self.evaluator.evaluate(self.model, self.valid_loader)
                 self.early_stopping(dev_loss)
@@ -180,13 +188,23 @@ class Trainer(object):
                 # save model when current dev_acc is greater than best_dev_acc 
                 if dev_acc > best_dev_acc:
                     best_dev_acc = dev_acc
-                    self.model.save_pretrained(self.ssl_path)
-                
+                    if self.model_type =='baseline':
+                        self.model.save_pretrained(self.ssl_path)
+                    else:
+                        self.lexicon = copy.deepcopy(self.lexicon_temp)
+                        torch.save({'model_state_dict':self.model.state_dict(),
+                                    'optimizer_state_dict':self.optimizer.state_dict(),
+                                    'epoch': {'outer_epoch':outer_epoch, 'inner_epoch':inner_epoch}},
+                                   self.ssl_path +'/checkpoint.pt')
+                        
                 if inner_epoch % 1 == 0:
                     test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
                     if best_accuracy < test_acc:
                         best_accuracy = test_acc
-                        
+                
+                if self.model_type != 'baseline':
+                    self.lexicon_temp = {label:{} for label in range(self.config.class_num)}
+                
                 if self.early_stopping.early_stop:
                     print("Early Stopping!")
                     break
@@ -221,7 +239,7 @@ class Trainer(object):
         if guide_type == 'predefined_lexicon':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type)
         elif guide_type =='generated_lexicon':
-            pass
+            new_dataset = guide_pseudo_labeling(new_dataset, guide_type, self.lexicon)
         elif guide_type == 'naive_bayes':
             pass
         elif guide_type == 'advanced_nb':
@@ -259,7 +277,9 @@ class Trainer(object):
 
     
     def build_lexicon(self, input_ids, targets, attns):
-        
+        '''
+        1. stop words 제거 
+        '''
         top_k = 3 
         values, indices = torch.topk(attns, top_k, dim=-1)
         decoded_inputs = self.tokenizer.batch_decode(input_ids)

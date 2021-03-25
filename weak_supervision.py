@@ -8,15 +8,18 @@ def get_lexicon():
     lexicon = {0:opinion_neg, 1:opinion_pos}
     return lexicon
 
-lexicon = get_lexicon()
 lemmatizer = WordNetLemmatizer()
 
-def guide_pseudo_labeling(pseudo_labeled, guide_type):
+def guide_pseudo_labeling(pseudo_labeled, guide_type, lexicon=None):
     '''
     @param dataset type: dict{pred_label}[list(tuple(text_id, decoded_text, pred_label, target, confidence))]
-    '''     
+    '''
     labels = pseudo_labeled.keys()
     new_dataset = {label: [] for label in labels}
+    print('#'*100)
+#     print(guide_type)
+#     print(lexicon)
+    
     for label in labels:
         for data in pseudo_labeled[label]:
             text_id = data[0]
@@ -27,9 +30,10 @@ def guide_pseudo_labeling(pseudo_labeled, guide_type):
             guide_pred = None
             
             if guide_type == 'predefined_lexicon':
+                lexicon = get_lexicon()
                 guide_pred = rule_base_with_lexicon(lexicon, decoded_text)
             elif guide_type == 'generated_lexicon':
-                pass
+                guide_pred = rule_base_with_lexicon(lexicon, decoded_text)
             elif guide_type == 'naive_bayes':
                 pass
             elif guide_type == 'advanced_nb':
@@ -39,9 +43,13 @@ def guide_pseudo_labeling(pseudo_labeled, guide_type):
                 new_dataset[label].append((text_id, decoded_text, model_pred, target, confidence))    
     return new_dataset
 
+'''
+1. 렉시콘 매칭 시, 같은 단어가 서로 다른 클래스에 등장한다면 빈도수로 가장 많이 받은 빈도수의 매칭을 택하여 해당 레이블의 카운트를 늘려줌
+2. 렉시콘 stop_words 제거 
+'''
 
 def rule_base_with_lexicon(lexicon, text):
-    ## To do: set threshold -> matching count
+    
     words = text.split(' ')
     words = [lemmatizer.lemmatize(word) for word in words]
     labels = lexicon.keys()
@@ -62,7 +70,8 @@ def rule_base_with_lexicon(lexicon, text):
         elif count == max_count:
             is_tie = True
     
-    if is_tie == True:
+    ## To do: set threshold -> matching count
+    if is_tie == True and max_count <= 2:
         predict_label = -1
     return predict_label
     
