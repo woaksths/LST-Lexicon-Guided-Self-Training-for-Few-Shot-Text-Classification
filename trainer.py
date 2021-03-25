@@ -3,8 +3,9 @@ import torch
 from evaluator import Evaluator
 from torch.utils.data import  DataLoader
 from util.early_stopping import EarlyStopping
-from transformers import BertTokenizer, BertForSequenceClassification
 from util.dataset import Dataset
+from util.lexicon_util import stop_words
+from transformers import BertTokenizer, BertForSequenceClassification
 from weak_supervision import guide_pseudo_labeling
 from nltk.stem import WordNetLemmatizer
 from model import BERT_ATTN
@@ -256,7 +257,7 @@ class Trainer(object):
         top_N = 1000
         num_of_min_dataset = min(top_N, num_of_min_dataset)
         print('num_of_min_dataset', num_of_min_dataset)
-
+        
         total, correct = 0, 0
         balanced_dataset = []
         
@@ -277,9 +278,6 @@ class Trainer(object):
 
     
     def build_lexicon(self, input_ids, targets, attns):
-        '''
-        1. stop words 제거 
-        '''
         top_k = 3 
         values, indices = torch.topk(attns, top_k, dim=-1)
         decoded_inputs = self.tokenizer.batch_decode(input_ids)
@@ -293,7 +291,7 @@ class Trainer(object):
                 # choose top one
                 vocab_id = input_id[seq_idxs[0].item()].item()
                 word = self.tokenizer.convert_ids_to_tokens(vocab_id)
-                if '#' in word or len(word) <=2:
+                if '#' in word or len(word) <=2 or word in stop_words:
                     continue
                 word = self.lemmatizer.lemmatize(word)
                 if word in self.lexicon_temp[label]:
@@ -305,7 +303,7 @@ class Trainer(object):
                 vocab_ids = [input_id[idx.item()].item() for idx in seq_idxs]
                 words = self.tokenizer.convert_ids_to_tokens(vocab_ids)
                 for word in words:
-                    if '#' in word or len(word) <=2:
+                    if '#' in word or len(word) <=2 or word in stop_words:
                         continue
                     word = self.lemmatizer.lemmatize(word)
                     if word in self.lexicon_temp[label]:

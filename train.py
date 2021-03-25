@@ -108,7 +108,7 @@ trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels))
 
 # load ssl checkpoint
 del model, optimizer, trainer.model, trainer.optimizer
-if args.model.type.lower() == 'baseline':
+if args.model_type.lower() == 'baseline':
     model = BertForSequenceClassification.from_pretrained(trainer.ssl_path).to(config.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-5)
 else:
