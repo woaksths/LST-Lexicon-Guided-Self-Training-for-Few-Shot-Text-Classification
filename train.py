@@ -25,7 +25,7 @@ test_texts, test_labels = read_dataset(args.test_path, config.class_num)
 labeled_data, remained_data = sampling_dataset(list(zip(train_texts, train_labels)), class_num=config.class_num, sample_num=30)
 dev_data, unlabeled_data = sampling_dataset(remained_data, class_num=config.class_num, sample_num=30)
 
-print('labeled num {}, unlabeled num {}, valid num {}'.format(len(labeled_data), len(unlabeled_data), len(dev_data)))
+print('labeled num {}, valid num {},  unlabeled num {}'.format(len(labeled_data), len(dev_data), len(unlabeled_data)))
 
 # Tokenizing 
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -36,6 +36,7 @@ labeled_labels = [data[1] for data in labeled_data]
 train_texts = copy.deepcopy(labeled_texts)
 train_labels = copy.deepcopy(labeled_labels)
 
+'''
 if args.do_augment is True:
     augmented_texts, augmented_labels = back_translate(labeled_texts, labeled_labels)
     train_texts.extend(augmented_texts)
@@ -45,8 +46,9 @@ if args.do_augment is True:
     train_texts.extend(augmented_texts)
     train_labels.extend(augmented_labels)
     
-    print(len(train_texts), len(train_labels))
-    
+    print('augmented_train num {}'.format(len(train_labels)))
+'''
+
 train_encodings = tokenizer(train_texts, truncation=True, padding=True)
 train_dataset = Dataset(train_encodings, train_labels)
 
@@ -78,7 +80,9 @@ loss_function = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=2e-5) #or AdamW
 
 # Init Trainer
-trainer = Trainer(config, model, loss_function, optimizer, args.save_path, dev_dataset, test_dataset, args.model_type)
+trainer = Trainer(config, model, loss_function, optimizer, 
+                  args.save_path, dev_dataset, test_dataset,
+                  args.model_type, args.do_augment)
 
 # Initial training (supervised leraning)
 trainer.initial_train(train_dataset)
