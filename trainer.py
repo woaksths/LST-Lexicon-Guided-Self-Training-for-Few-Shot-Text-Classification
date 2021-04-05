@@ -9,13 +9,13 @@ from transformers import BertTokenizer, BertForSequenceClassification
 from weak_supervision import guide_pseudo_labeling
 from nltk.stem import WordNetLemmatizer
 from model import BERT_ATTN
-
+from util.augment import *
 import random
 import copy
 
 class Trainer(object):
     def __init__(self, config, model, criterion, optimizer, 
-                 save_path, dev_dataset, test_dataset, model_type):
+                 save_path, dev_dataset, test_dataset, model_type, do_augment):
         self.config = config
         self.loss = criterion
         self.evaluator = Evaluator(loss=self.loss, batch_size=self.config.test_batch_size)
@@ -23,6 +23,8 @@ class Trainer(object):
         self.device = self.config.device
         self.model = model.to(self.device)
         self.model_type = model_type
+        self.do_augment = do_augment
+        
         if self.model_type != 'baseline':
             self.lexicon = {label:{} for label in range(self.config.class_num)}
             self.lexicon_temp = {label:{} for label in range(self.config.class_num)}
@@ -64,15 +66,17 @@ class Trainer(object):
         self.model.train()
         
         print('train_epoch', epoch)
+        print(len(self.train_loader.dataset))
         for _, batch in enumerate(self.train_loader):
             ids = batch['input_ids'].to(self.device, dtype=torch.long)
             attention_mask = batch['attention_mask'].to(self.device, dtype=torch.long)
             token_type_ids = batch['token_type_ids'].to(self.device, dtype=torch.long)
             targets = batch['labels'].to(self.device, dtype=torch.long)
-            
+
             outputs = self.model(ids, attention_mask, token_type_ids, labels=targets)
             loss, logits = outputs[0], outputs[1]
             attn = None
+            
             if self.model_type != 'baseline':
                 attn = outputs[2]
                 self.build_lexicon(ids, targets, attn)
@@ -80,7 +84,7 @@ class Trainer(object):
             tr_loss += loss.item()
             scores = torch.softmax(logits, dim=-1)
             big_val, big_idx = torch.max(scores.data, dim=-1)
-            n_correct += self.calculate_accu(big_idx,targets)
+            n_correct += self.calculate_accu(big_idx, targets)
             nb_tr_steps += 1
             nb_tr_examples += targets.size(0)
             
@@ -103,7 +107,18 @@ class Trainer(object):
     
     def initial_train(self, label_dataset):
         print('initial train module')
-        self.train_loader = DataLoader(label_dataset, **self.config.train_params)
+        if self.do_augment:
+            decoded_texts = self.tokenizer.batch_decode(label_dataset.encodings['input_ids'],
+                                                        skip_special_tokens=True)
+            labels = label_dataset.labels
+            aug_texts, aug_labels = aug_backtranslate(decoded_texts, labels)
+            aug_encodings = self.tokenizer(aug_texts, truncation=True, padding=True)
+            aug_dataset = Dataset(aug_encodings, aug_labels)
+            print(len(aug_texts), len(aug_labels))
+            self.train_loader = DataLoader(aug_dataset, **self.config.train_params)    
+        else:
+            self.train_loader = DataLoader(label_dataset, **self.config.train_params)
+        
         self.early_stopping = EarlyStopping(patience=5, verbose=True)
         best_dev_acc = -1
         
@@ -124,10 +139,9 @@ class Trainer(object):
                     torch.save({'model_state_dict':self.model.state_dict(),
                                 'optimizer_state_dict':self.optimizer.state_dict(),'epoch':epoch},
                                self.sup_path +'/checkpoint.pt')
-            
+                    
 #             print('lexicon_temp', self.lexicon_temp)
 #             print('lexicon', self.lexicon)
-            
             if epoch % 1 == 0:
                 test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
             
@@ -137,17 +151,17 @@ class Trainer(object):
             if self.early_stopping.early_stop:
                 print("Eearly Stopping!")
                 break
-
+                
                 
     def self_train(self, labeled_dataset, unlabeled_dataset, guide_type=None, confidence_threshold=0.9):
         best_accuracy = -1
         min_dev_loss = 987654321
-        best_dev_acc = -1
+        
         print(len(unlabeled_dataset))
         print(type(unlabeled_dataset))
         
         for outer_epoch in range(self.config.epochs):
-            sampled_num = len(unlabeled_dataset) // 4
+            sampled_num = len(unlabeled_dataset) // 2
             random.shuffle(unlabeled_dataset)            
             sampled_unlabeled = unlabeled_dataset[:sampled_num]
             
@@ -180,6 +194,7 @@ class Trainer(object):
                 self.optimizer = torch.optim.Adam(self.model.parameters(), lr=2e-5)
                 
             # retrain model with labeled data + pseudo-labeled data
+            best_dev_acc = -1
             for inner_epoch in range(self.config.epochs):
                 print('outer_epoch {} inner_epoch {} best_accuracy {}'.format(outer_epoch, inner_epoch, best_accuracy))
                 self.train_epoch(inner_epoch)
@@ -211,7 +226,7 @@ class Trainer(object):
                     break
                     
         print('Best accuracy {}'.format(best_accuracy))
-    
+        
     
     def pseudo_labeling(self, unlabeled_dataset, confidence_threshold, guide_type=None):
         unlabeled_loader = DataLoader(unlabeled_dataset, **self.config.unlabeled_params)
@@ -233,18 +248,16 @@ class Trainer(object):
                 for text_id, label, conf_val, target in zip(ids, big_idx, big_val, targets):
                     pred_label, conf_val, target = label.item(), conf_val.item(), target.item()
                     if conf_val >= confidence_threshold:
-                        decoded_text = self.tokenizer.decode(text_id)
-                        decoded_text = decoded_text.replace("[CLS]", "").replace("[SEP]","").replace("[PAD]","").strip()
+                        decoded_text = self.tokenizer.decode(text_id, skip_special_tokens=True)
                         new_dataset[pred_label].append((text_id, decoded_text, pred_label, target, conf_val))
                 
         if guide_type == 'predefined_lexicon':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type)
         elif guide_type =='generated_lexicon':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type, self.lexicon)
-        elif guide_type == 'naive_bayes':
+        elif guide_type == 'advanced_generated_lexicon':
             pass
-        elif guide_type == 'advanced_nb':
-            pass
+        
         
         # make new_dataset being balanced 
         num_of_min_dataset = 987654321
@@ -254,7 +267,7 @@ class Trainer(object):
                 num_of_min_dataset = len(dataset)
         
         # sampling top N 
-        top_N = 1000
+        top_N = 3000
         num_of_min_dataset = min(top_N, num_of_min_dataset)
         print('num_of_min_dataset', num_of_min_dataset)
         
@@ -358,8 +371,7 @@ class Trainer(object):
         for idx in range(len(dataset)):
             text_id = dataset[idx]['input_ids']
             label = dataset[idx]['labels'].item()
-            decoded_text = self.tokenizer.decode(text_id)
-            decoded_text = decoded_text.replace("[CLS]", "").replace("[SEP]","").replace("[PAD]","").strip()
+            decoded_text = self.tokenizer.decode(text_id, skip_special_tokens=True)
             decoded_texts.append(decoded_text)
             labels.append(label)
         return decoded_texts, labels
