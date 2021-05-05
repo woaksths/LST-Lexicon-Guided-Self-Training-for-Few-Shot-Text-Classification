@@ -4,7 +4,7 @@
 
 1. Train a classifier on labeled data (teacher) and [build the lexicon](/asset/lexicon_construction.md) with attention mechanism.
 2. Infer labels on a much larger unlabeled dataset with [lexicon-guided pseudo-labeling](/asset/lexicon_guided_PL.md). 
-3. Train a larger classifier (student) on combined set with noise and [builde the lexicon](/asset/lexicon/_construction.md) from student. 
+3. Train a larger classifier (student) on combined set with noise and [build the lexicon](/asset/lexicon_construction.md) from student. 
 4. Go to step 2, with studnet as teacher. And update the lexicon with the ones built at student steps.
 
 ![](/asset/LST_overview.png)
