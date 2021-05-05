@@ -7,4 +7,4 @@
 3. Train a larger classifier (student) on combined set with noise and builde the lexicon from student. 
 4. Go to step 2, with studnet as teacher. And update the lexicon with the ones built at student steps.
 
-![Alt text](/asset/lst_overview.jpg)
+![](/asset/LST_overview.jpg)
