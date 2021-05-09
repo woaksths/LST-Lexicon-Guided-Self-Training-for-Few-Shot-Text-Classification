@@ -66,7 +66,6 @@ class Trainer(object):
         self.model.train()
         
         print('train_epoch', epoch)
-        print(len(self.train_loader.dataset))
         for _, batch in enumerate(self.train_loader):
             ids = batch['input_ids'].to(self.device, dtype=torch.long)
             attention_mask = batch['attention_mask'].to(self.device, dtype=torch.long)
@@ -102,29 +101,17 @@ class Trainer(object):
         epoch_accu = (n_correct*100)/nb_tr_examples
         print(f"Training Loss Epoch: {epoch_loss}")
         print(f"Training Accuracy Epoch: {epoch_accu}")
-#         print('current epoch lex', self.lexicon_temp)
         
     
     def initial_train(self, label_dataset):
         print('initial train module')
-        if self.do_augment:
-            decoded_texts = self.tokenizer.batch_decode(label_dataset.encodings['input_ids'],
-                                                        skip_special_tokens=True)
-            labels = label_dataset.labels
-            aug_texts, aug_labels = aug_backtranslate(decoded_texts, labels)
-            aug_encodings = self.tokenizer(aug_texts, truncation=True, padding=True)
-            aug_dataset = Dataset(aug_encodings, aug_labels)
-            print(len(aug_texts), len(aug_labels))
-            self.train_loader = DataLoader(aug_dataset, **self.config.train_params)    
-        else:
-            self.train_loader = DataLoader(label_dataset, **self.config.train_params)
+        self.train_loader = DataLoader(label_dataset, **self.config.train_params)
         
         self.early_stopping = EarlyStopping(patience=5, verbose=True)
         best_dev_acc = -1
         
         for epoch in range(self.config.epochs):
             self.train_epoch(epoch)
-            
             dev_loss, dev_acc = self.evaluator.evaluate(self.model, self.valid_loader)
             self.early_stopping(dev_loss)
             
@@ -140,8 +127,6 @@ class Trainer(object):
                                 'optimizer_state_dict':self.optimizer.state_dict(),'epoch':epoch},
                                self.sup_path +'/checkpoint.pt')
                     
-#             print('lexicon_temp', self.lexicon_temp)
-#             print('lexicon', self.lexicon)
             if epoch % 1 == 0:
                 test_loss, test_acc = self.evaluator.evaluate(self.model, self.test_loader, is_test=True)
             
@@ -251,26 +236,23 @@ class Trainer(object):
                         decoded_text = self.tokenizer.decode(text_id, skip_special_tokens=True)
                         new_dataset[pred_label].append((text_id, decoded_text, pred_label, target, conf_val))
                 
-        if guide_type == 'predefined_lexicon':
+        if guide_type == 'predefined_lexicon_pl':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type)
-        elif guide_type =='generated_lexicon':
+        elif guide_type =='lexicon_pl':
             new_dataset = guide_pseudo_labeling(new_dataset, guide_type, self.lexicon)
-        elif guide_type == 'advanced_generated_lexicon':
+        elif guide_type == 'weigthed_lexicon_pl':
             pass
-        
         
         # make new_dataset being balanced 
         num_of_min_dataset = 987654321
         
         for label, dataset in new_dataset.items():
+            print('label:{} len:{}'.format(label, len(dataset)))
             if num_of_min_dataset > len(dataset):
                 num_of_min_dataset = len(dataset)
-        
-        # sampling top N 
-        top_N = 3000
-        num_of_min_dataset = min(top_N, num_of_min_dataset)
+                
         print('num_of_min_dataset', num_of_min_dataset)
-        
+        num_of_min_dataset = num_of_min_dataset // 2  
         total, correct = 0, 0
         balanced_dataset = []
         

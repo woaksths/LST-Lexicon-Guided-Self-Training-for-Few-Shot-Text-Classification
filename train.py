@@ -6,7 +6,7 @@ from transformers import BertTokenizer, BertForSequenceClassification
 from model import BERT_ATTN
 from torch.utils.data import  DataLoader
 from trainer import Trainer
-from util.augment import *
+# from util.augment import *
 import copy
 
 parser = argparse.ArgumentParser()
@@ -30,25 +30,8 @@ print('labeled num {}, valid num {},  unlabeled num {}'.format(len(labeled_data)
 # Tokenizing 
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
-labeled_texts = [data[0] for data in labeled_data]
-labeled_labels = [data[1] for data in labeled_data]
-
-train_texts = copy.deepcopy(labeled_texts)
-train_labels = copy.deepcopy(labeled_labels)
-
-'''
-if args.do_augment is True:
-    augmented_texts, augmented_labels = back_translate(labeled_texts, labeled_labels)
-    train_texts.extend(augmented_texts)
-    train_labels.extend(augmented_labels)
-    
-    augmented_texts, augmented_labels = word_replacement(labeled_texts, labeled_labels)
-    train_texts.extend(augmented_texts)
-    train_labels.extend(augmented_labels)
-    
-    print('augmented_train num {}'.format(len(train_labels)))
-'''
-
+train_texts = [data[0] for data in labeled_data]
+train_labels = [data[1] for data in labeled_data]
 train_encodings = tokenizer(train_texts, truncation=True, padding=True)
 train_dataset = Dataset(train_encodings, train_labels)
 
@@ -65,9 +48,6 @@ unlabeled_texts = [data[0] for data in unlabeled_data]
 unlabeled_labels = [data[1] for data in unlabeled_data]
 unlabeled_encodings = tokenizer(unlabeled_texts, truncation=True, padding=True)
 unlabeled_dataset = Dataset(unlabeled_encodings, unlabeled_labels)
-
-labeled_encodings = tokenizer(labeled_texts, truncation=True, padding=True)
-labeled_dataset = Dataset(labeled_encodings, labeled_labels)
 
 # Build model 
 if args.model_type.lower() == 'baseline':
@@ -107,8 +87,8 @@ trainer.optimizer = optimizer
 # eval supervised trained model 
 trainer.evaluator.evaluate(trainer.model, trainer.test_loader, is_test=True)
 
-# self-training -> guide_type = ['predefined_lexicon', 'generated_lexicon', 'naive_bayes', 'advanced_nb']
-trainer.self_train(labeled_dataset, list(zip(unlabeled_texts, unlabeled_labels)), guide_type= 'generated_lexicon')
+# self-training -> guide_type = ['predefined_lexicon_pl', 'lexicon_pl', 'weighted_lexicon_pl']
+trainer.self_train(train_dataset, list(zip(unlabeled_texts, unlabeled_labels)), guide_type= 'lexicon_pl', confidence_threshold=0.9)
 
 # load ssl checkpoint
 del model, optimizer, trainer.model, trainer.optimizer
